@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  agent-cheap:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    command: >
+      uv run uvicorn story_engine.scripts.agent_server:app --host 0.0.0.0 --port 8000
+    environment:
+      - AGENT_PROFILE=cheap
+      - PORT=8000
+      - LM_ENDPOINT=${LM_ENDPOINT:-http://ai-lb:8000}
+      - LM_FAST_MODEL=${LM_FAST_MODEL:-gemma-2-9b-instruct}
+      - HPQ_THRESHOLD_LOW=0.0  # Force NO internal escalation in cheap tier
+      - HPQ_CANDIDATES=2
+      - MAX_TOKENS_FAST=400
+    networks:
+      - agent-net
+
+  agent-heavy:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    command: >
+      uv run uvicorn story_engine.scripts.agent_server:app --host 0.0.0.0 --port 8000
+    environment:
+      - AGENT_PROFILE=heavy
+      - PORT=8000
+      - LM_ENDPOINT=${LM_ENDPOINT:-http://ai-lb:8000}
+      - LM_HQ_MODEL=${LM_HQ_MODEL:-llama-3.1-70b-instruct}
+      - HPQ_FORCE_24B=1  # Always refine in heavy tier
+      - MAX_TOKENS_HQ=1000
+    networks:
+      - agent-net
+
+  router:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    command: >
+      python /app/deploy/power-dev/router.py
+    volumes:
+      - .:/app/deploy/power-dev
+    environment:
+      - CHEAP_URL=http://agent-cheap:8000
+      - HEAVY_URL=http://agent-heavy:8000
+      - ESCALATION_THRESHOLD=7.5
+      - PORT=8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - agent-cheap
+      - agent-heavy
+    networks:
+      - agent-net
+
+networks:
+  agent-net:
+    driver: bridge
